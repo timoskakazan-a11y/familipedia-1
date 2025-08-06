@@ -99,35 +99,26 @@
       // --- ИСПРАВЛЕННАЯ ФУНКЦИЯ ОБРАБОТКИ КОНТЕНТА ---
       function processContent(rawContent) {
         if (!rawContent) return '';
-        let tempContent = rawContent;
-        const replacements = {};
-        let counter = 0;
-        const createPlaceholder = (type) => `__${type}_${counter++}__`;
-
-        // 1. Найти и заменить сноски на плейсхолдеры
-        tempContent = tempContent.replace(/\[\^([^:]+):([^\]]+)\]/g, (match, text, footnote) => {
-            const placeholder = createPlaceholder('FOOTNOTE');
+        
+        // Этап 1: Сначала обрабатываем весь текст библиотекой `marked`.
+        // Она преобразует ##, *, но оставит `[@...]` и `[^...]` как обычный текст.
+        let html = marked.parse(rawContent);
+        
+        // Этап 2: Теперь, в готовом HTML, мы заменяем текстовые представления
+        // наших тегов на настоящие, стилизованные HTML-ссылки.
+        
+        // Заменяем сноски: [^текст:содержимое]
+        html = html.replace(/\[\^([^:]+):([^\]]+)\]/g, (match, text, footnote) => {
             const encodedFootnote = DOMPurify.sanitize(footnote.trim()).replace(/"/g, '&quot;');
-            replacements[placeholder] = `<a href="#" class="footnote-link" data-footnote-content="${encodedFootnote}">${DOMPurify.sanitize(text.trim())}</a>`;
-            return placeholder;
-        });
-
-        // 2. Найти и заменить упоминания на плейсхолдеры
-        tempContent = tempContent.replace(/\[@([^:]+):([^\]]+)\]/g, (match, text, id) => {
-            const placeholder = createPlaceholder('MENTION');
-            const safeText = DOMPurify.sanitize(text.trim());
-            const safeId = DOMPurify.sanitize(id.trim());
-            replacements[placeholder] = `<a href="#" class="mention-link" data-mention-id="${safeId}" data-mention-name="${safeText}">${safeText}</a>`;
-            return placeholder;
+            return `<a href="#" class="footnote-link" data-footnote-content="${encodedFootnote}">${DOMPurify.sanitize(text.trim())}</a>`;
         });
         
-        // 3. Обработать оставшийся Markdown
-        let html = marked.parse(tempContent);
-
-        // 4. Вернуть HTML-теги на место плейсхолдеров
-        for (const placeholder in replacements) {
-            html = html.replace(new RegExp(placeholder, 'g'), replacements[placeholder]);
-        }
+        // Заменяем упоминания: [@текст:id]
+        html = html.replace(/\[@([^:]+):([^\]]+)\]/g, (match, text, id) => {
+            const safeText = DOMPurify.sanitize(text.trim());
+            const safeId = DOMPurify.sanitize(id.trim());
+            return `<a href="#" class="mention-link" data-mention-id="${safeId}" data-mention-name="${safeText}">${safeText}</a>`;
+        });
         
         return html;
       }
@@ -139,18 +130,20 @@
 
       function renderSidebarHtml() {
         const filteredItems = state.items.filter(i => (i.name || '').toLowerCase().includes(state.searchTerm.toLowerCase()));
-        const createListHtml = (items) => {
-          if (!items || items.length === 0) return '<li class="text-sm text-gray-500 p-2">Ничего не найдено</li>';
-          return items.map(item => {
+        const createListHtml = (items, typeName) => {
+          if (filteredItems.filter(i => i.type === typeName).length === 0) return '';
+          const listContent = items.map(item => {
             const isActive = item.id === state.selectedItemId;
             const activeClasses = 'bg-brand-accent text-white shadow-md shadow-blue-500/30';
             const inactiveClasses = 'text-brand-text-primary hover:bg-black/5';
             return `<li data-id="${item.id}"><a href="#${item.id}" class="block p-2.5 my-1 rounded-lg text-left w-full transition-colors duration-150 ${isActive ? activeClasses : inactiveClasses}"><span class="font-medium">${item.name}</span></a></li>`;
           }).join('');
+          return listContent || '<li class="text-sm text-gray-500 p-2">Ничего не найдено</li>';
         };
-        const relativesHtml = createListHtml(filteredItems.filter(i => i.type === 'relative'));
-        const eventsHtml = createListHtml(filteredItems.filter(i => i.type === 'event'));
-        return `<div class="p-4 border-b border-black/10 flex items-center justify-between flex-shrink-0"><div class="flex items-center space-x-3">${ICONS.bookOpen}<h1 class="text-xl font-semibold text-brand-text-primary">FamiliPedia</h1></div></div><div class="p-4 flex-shrink-0"><div class="relative"><input type="text" placeholder="Search..." value="${state.searchTerm}" id="search-input" class="w-full pl-10 pr-4 py-2 bg-gray-100 text-brand-text-primary placeholder-brand-text-secondary border border-transparent rounded-lg focus:ring-2 focus:ring-brand-accent focus:outline-none focus:bg-white transition-all duration-300"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">${ICONS.search}</div></div></div><nav class="flex-1 overflow-y-auto px-4 pt-0"><details open class="mb-4"><summary class="flex items-center space-x-2 p-2 rounded-lg bg-gray-100 text-brand-text-primary"><span class="summary-arrow text-gray-500">▶</span><span>👨‍👩‍👧‍👦 Родственники</span></summary><ul class="pt-2 pl-4">${relativesHtml}</ul></details><details open><summary class="flex items-center space-x-2 p-2 rounded-lg bg-gray-100 text-brand-text-primary"><span class="summary-arrow text-gray-500">▶</span><span>🗓️ События</span></summary><ul class="pt-2 pl-4">${eventsHtml}</ul></details></nav>`;
+        const relativesHtml = createListHtml(filteredItems.filter(i => i.type === 'relative'), 'relative');
+        const eventsHtml = createListHtml(filteredItems.filter(i => i.type === 'event'), 'event');
+        
+        return `<div class="p-4 border-b border-black/10 flex items-center justify-between flex-shrink-0"><div class="flex items-center space-x-3">${ICONS.bookOpen}<h1 class="text-xl font-semibold text-brand-text-primary">FamiliPedia</h1></div></div><div class="p-4 flex-shrink-0"><div class="relative"><input type="text" placeholder="Search..." value="${state.searchTerm}" id="search-input" class="w-full pl-10 pr-4 py-2 bg-gray-100 text-brand-text-primary placeholder-brand-text-secondary border border-transparent rounded-lg focus:ring-2 focus:ring-brand-accent focus:outline-none focus:bg-white transition-all duration-300"><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">${ICONS.search}</div></div></div><nav class="flex-1 overflow-y-auto px-4 pt-0">${relativesHtml ? `<details open class="mb-4"><summary class="flex items-center space-x-2 p-2 rounded-lg bg-gray-100 text-brand-text-primary"><span class="summary-arrow text-gray-500">▶</span><span>👨‍👩‍👧‍👦 Родственники</span></summary><ul class="pt-2 pl-4">${relativesHtml}</ul></details>` : ''}${eventsHtml ? `<details open><summary class="flex items-center space-x-2 p-2 rounded-lg bg-gray-100 text-brand-text-primary"><span class="summary-arrow text-gray-500">▶</span><span>🗓️ События</span></summary><ul class="pt-2 pl-4">${eventsHtml}</ul></details>` : ''}</nav>`;
       }
       
       function renderMainContentHtml(item) {
@@ -197,7 +190,6 @@
 
       function init() {
         marked.setOptions({ gfm: true, breaks: true });
-
         const initialId = window.location.hash.substring(1);
         if (initialId && state.items.find(i => i.id === initialId)) {
           state.selectedItemId = initialId;
@@ -208,24 +200,12 @@
         renderFullPage();
 
         document.addEventListener('click', (e) => {
-            // ... (Вся логика обработчиков кликов остается без изменений) ...
             const app = e.target.closest('#app-container');
             if (app) {
               const link = e.target.closest('li[data-id] a');
-              if (link) { 
-                  e.preventDefault(); 
-                  const id = link.parentElement.dataset.id; 
-                  if (id !== state.selectedItemId) { window.location.hash = id; } 
-                  if (window.innerWidth < 768) { toggleSidebar(true); }
-                  return;
-              }
+              if (link) { e.preventDefault(); const id = link.parentElement.dataset.id; if (id !== state.selectedItemId) { window.location.hash = id; } if (window.innerWidth < 768) { toggleSidebar(true); } return; }
               const directLink = e.target.closest('a[href^="#"]');
-              if (directLink && !e.target.closest('.footnote-link, .mention-link')) {
-                  e.preventDefault();
-                  const id = directLink.getAttribute('href').substring(1);
-                  if (id !== state.selectedItemId) { window.location.hash = id; }
-                  return;
-              }
+              if (directLink && !e.target.closest('.footnote-link, .mention-link')) { e.preventDefault(); const id = directLink.getAttribute('href').substring(1); if (id !== state.selectedItemId) { window.location.hash = id; } return; }
               const copyButton = e.target.closest('[data-copy-link]');
               if (copyButton) { navigator.clipboard.writeText(copyButton.dataset.copyLink).then(() => { const originalContent = copyButton.innerHTML; copyButton.innerHTML = 'Скопировано!'; setTimeout(() => { copyButton.innerHTML = originalContent; }, 2000); }); return; }
               if (e.target.closest('#menu-button')) { toggleSidebar(); return; }
@@ -234,10 +214,7 @@
             const footnoteLink = e.target.closest('.footnote-link');
             const mentionLink = e.target.closest('.mention-link');
             const isPopupClick = e.target.closest('#footnote-popup, #mention-popup');
-            if (!footnoteLink && !mentionLink && !isPopupClick) {
-              footnotePopup.classList.add('hidden');
-              mentionPopup.classList.add('hidden');
-            }
+            if (!footnoteLink && !mentionLink && !isPopupClick) { footnotePopup.classList.add('hidden'); mentionPopup.classList.add('hidden'); }
             if (footnoteLink) {
               e.preventDefault();
               mentionPopup.classList.add('hidden');
@@ -262,11 +239,7 @@
               mentionPopup.classList.remove('hidden');
               return;
             }
-            if (e.target.id === 'mention-confirm') {
-              const targetId = e.target.dataset.targetId;
-              window.location.hash = targetId;
-              mentionPopup.classList.add('hidden');
-            }
+            if (e.target.id === 'mention-confirm') { const targetId = e.target.dataset.targetId; window.location.hash = targetId; mentionPopup.classList.add('hidden'); }
         });
 
         appContainer.addEventListener('input', (e) => {
